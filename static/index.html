@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="description" content="TrailLens — offline trail plant identifier. Local open-weight vision model, no cloud, no signal needed." />
+<meta name="theme-color" content="#1a2e1a" />
+<title>TrailLens — What plant is this?</title>
+<style>
+  :root { --bg:#101a10; --card:#1a2b1a; --accent:#7fc96b; --text:#eef5e9; --muted:#a9bfa4; --warn:#e0a458; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,system-ui,sans-serif;
+         min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:20px 16px 40px; }
+  header { text-align:center; margin:12px 0 20px; }
+  header h1 { font-size:1.9rem; letter-spacing:.5px; }
+  header h1 span { color:var(--accent); }
+  header p { color:var(--muted); font-size:.9rem; margin-top:6px; }
+  .pill { display:inline-block; background:#243824; color:var(--accent); border:1px solid #33502f;
+          border-radius:999px; padding:4px 12px; font-size:.75rem; margin-top:10px; }
+  main { width:100%; max-width:480px; display:flex; flex-direction:column; gap:14px; }
+  .card { background:var(--card); border:1px solid #2c4429; border-radius:16px; padding:18px; }
+  #preview { width:100%; border-radius:12px; display:none; max-height:320px; object-fit:cover; }
+  .btn { display:block; width:100%; padding:15px; border:none; border-radius:14px; font-size:1.05rem;
+         font-weight:700; cursor:pointer; }
+  .btn-primary { background:var(--accent); color:#10240f; }
+  .btn-ghost { background:transparent; color:var(--accent); border:2px dashed #3c5a38; }
+  .btn:disabled { opacity:.5; cursor:wait; }
+  #result { display:none; }
+  #result h2 { font-size:1.4rem; }
+  #result .sci { color:var(--muted); font-style:italic; margin:2px 0 10px; }
+  .confbar { height:10px; background:#0d150d; border-radius:6px; overflow:hidden; margin:8px 0 4px; }
+  .confbar i { display:block; height:100%; background:var(--accent); border-radius:6px; }
+  .conflabel { font-size:.8rem; color:var(--muted); }
+  #result ul { margin:10px 0 10px 18px; font-size:.95rem; }
+  #result li { margin:4px 0; }
+  .note { font-size:.9rem; color:var(--muted); margin-top:10px; line-height:1.45; }
+  .safety { border-left:3px solid var(--warn); padding-left:10px; margin-top:12px;
+            font-size:.88rem; color:#f0d9b5; }
+  #status { text-align:center; color:var(--muted); font-size:.85rem; min-height:1.2em; }
+  footer { margin-top:26px; text-align:center; color:var(--muted); font-size:.78rem; max-width:480px; line-height:1.5; }
+  input[type=file] { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌿 Trail<span>Lens</span></h1>
+  <p>Point, shoot, identify — no signal required.</p>
+  <span class="pill">100% on-device · open-weight model · no cloud</span>
+</header>
+<main>
+  <div class="card">
+    <img id="preview" alt="Photo of a plant to identify" />
+    <label class="btn btn-ghost" for="file">📷 Take / upload a plant photo</label>
+    <input type="file" id="file" accept="image/*" capture="environment" />
+    <div style="height:12px"></div>
+    <button class="btn btn-primary" id="go" disabled>Identify this plant</button>
+    <p id="status"></p>
+  </div>
+  <div class="card" id="result">
+    <h2 id="r-common">—</h2>
+    <p class="sci" id="r-sci">—</p>
+    <div class="confbar"><i id="r-bar" style="width:0%"></i></div>
+    <p class="conflabel" id="r-conf">confidence —</p>
+    <ul id="r-features"></ul>
+    <p class="note" id="r-habitat"></p>
+    <p class="safety" id="r-safety"></p>
+  </div>
+</main>
+<footer>
+  TrailLens runs a local open-weight vision model (Moondream2 via Ollama) entirely on your machine —
+  photos never leave your device. For education and curiosity only: never eat or use wild plants
+  without expert verification.
+</footer>
+<script>
+const file = document.getElementById('file');
+const preview = document.getElementById('preview');
+const go = document.getElementById('go');
+const status = document.getElementById('status');
+let blob = null;
+
+file.addEventListener('change', () => {
+  blob = file.files[0];
+  if (!blob) return;
+  preview.src = URL.createObjectURL(blob);
+  preview.style.display = 'block';
+  go.disabled = false;
+  status.textContent = '';
+});
+
+go.addEventListener('click', async () => {
+  if (!blob) return;
+  go.disabled = true;
+  status.textContent = 'Identifying locally…';
+  document.getElementById('result').style.display = 'none';
+  try {
+    const fd = new FormData();
+    fd.append('photo', blob);
+    const r = await fetch('/api/identify', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const d = await r.json();
+    document.getElementById('r-common').textContent = d.common_name;
+    document.getElementById('r-sci').textContent = d.scientific_name;
+    document.getElementById('r-bar').style.width = Math.round(d.confidence * 100) + '%';
+    document.getElementById('r-conf').textContent =
+      'confidence ' + Math.round(d.confidence * 100) + '% — model may be wrong, verify before trusting';
+    document.getElementById('r-features').innerHTML =
+      d.identifying_features.map(f => `<li>${f}</li>`).join('');
+    document.getElementById('r-habitat').textContent = '🏕️ ' + d.habitat_note;
+    document.getElementById('r-safety').textContent = '⚠️ ' + d.safety_note;
+    document.getElementById('result').style.display = 'block';
+    status.textContent = '';
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+  }
+  go.disabled = false;
+});
+</script>
+</body>
+</html>
